@@ -1,0 +1,55 @@
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: environments.example.io
+spec:
+  scope: Namespaced
+  group: example.io
+  names:
+    kind: Environment
+    plural: environments
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                type:
+                  type: string
+                  description: Type of landing zone to create
+                  enum:
+                    - SharedServices
+                    - Standard
+                  default: Standard
+                members:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      email:
+                        type: string
+                        description: User's email address.
+                        maxLength: 255
+                        pattern: ^[a-zA-Z]+([\._-][a-zA-Z0-9]+)*(#EXT#)?@([a-zA-Z0-9]+\.)+[a-z]+$
+                      role:
+                        type: string
+                        description: Role assigned to the user.
+                        enum:
+                          - Contributor
+                          - Owner
+                          - Reader
+                        default: Reader
+                    required:
+                      - email
+            status:
+              type: object
+              properties:
+                subscriptionId:
+                  type: string
+                  description: The subscription ID of the environment.

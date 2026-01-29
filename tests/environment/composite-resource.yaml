@@ -1,0 +1,16 @@
+---
+apiVersion: example.io/v1alpha1
+kind: Environment
+metadata:
+  name: dev
+  namespace: team-a
+spec:
+  type: Standard
+  members:
+    - email: foo.bar@example.io
+      role: Owner
+    - email: baz.qux@example.io
+      role: Contributor
+  crossplane:
+    compositionRef:
+      name: environments.example.io

@@ -1,0 +1,429 @@
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: environments.example.io
+spec:
+  compositeTypeRef:
+    apiVersion: example.io/v1alpha1
+    kind: Environment
+  mode: Pipeline
+  pipeline:
+    - step: lookup-environment-config
+      functionRef:
+        name: crossplane-contrib-function-environment-configs
+      input:
+        apiVersion: environmentconfigs.fn.crossplane.io/v1beta1
+        kind: Input
+        spec:
+          environmentConfigs:
+            - type: Reference
+              ref:
+                name: azure
+    - step: prepare
+      functionRef:
+        name: crossplane-contrib-function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $env := .context | dig "apiextensions.crossplane.io/environment" dict }}
+            {{- $xr := getCompositeResource . }}
+            {{- $type := $xr.spec.type }}
+            {{- $subscriptionName := printf "%[1]s-%[2]s" $xr.metadata.namespace $xr.metadata.name }}
+
+            {{- $e := dict }}
+            {{- with $env | dig "archetypes" $type "managementGroupIdSelector" nil }}
+              {{- $e = set $e "managementGroupIdSelector" . }}
+            {{- end }}
+            {{- with $env | dig "archetypes" $type "managementGroupId" nil }}
+              {{- $e = set $e "managementGroupId" (print "/providers/Microsoft.Management/managementGroups/" .) }}
+            {{- end }}
+            {{- $e = set $e "subscriptionName" $subscriptionName }}
+
+            ---
+            apiVersion: meta.gotemplating.fn.crossplane.io/v1alpha1
+            kind: Context
+            data:
+              apiextensions.crossplane.io/environment: {{ $e | toJson }}
+    - step: patch-and-transform
+      functionRef:
+        name: crossplane-contrib-function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        patchSets:
+          - name: provider-config-name
+            patches:
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: providerconfig.azure.name
+                toFieldPath: spec.providerConfigRef.name
+        resources:
+          - name: subscription
+            base:
+              apiVersion: azure.m.upbound.io/v1beta1
+              kind: Subscription
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.generateName # NOTE: metadata.generateName patch
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "env-%s-"
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: subscriptionName
+                toFieldPath: spec.forProvider.subscriptionName
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: billing.billingScopeId
+                toFieldPath: spec.forProvider.billingScopeId
+              - type: ToEnvironmentFieldPath
+                fromFieldPath: status.atProvider.subscriptionId
+                toFieldPath: subscription.subscriptionId
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.atProvider.subscriptionId
+                toFieldPath: status.subscriptionId
+          - name: subscription-managementgroup-association
+            base:
+              apiVersion: management.azure.m.upbound.io/v1beta1
+              kind: ManagementGroupSubscriptionAssociation
+              spec:
+                managementPolicies:
+                  - Create
+                  - LateInitialize
+                  - Observe
+                  - Update
+            patches:
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: subscription.subscriptionId
+                toFieldPath: spec.forProvider.subscriptionId
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "/subscriptions/%s"
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: managementGroupId
+                toFieldPath: spec.forProvider.managementGroupId
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: managementGroupIdSelector
+                toFieldPath: spec.forProvider.managementGroupIdSelector
+          - name: identity
+            base:
+              apiVersion: managedidentity.azure.m.upbound.io/v1beta1
+              kind: UserAssignedIdentity
+              spec:
+                forProvider:
+                  location: norwayeast
+            patches:
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: metadata.namespace
+                    - fromFieldPath: metadata.name
+                  strategy: string
+                  string:
+                    fmt: "%s-%s"
+                toFieldPath: spec.forProvider.name
+              - type: ToEnvironmentFieldPath
+                fromFieldPath: status.atProvider.principalId
+                toFieldPath: identity.principalId
+              - type: ToEnvironmentFieldPath
+                fromFieldPath: status.atProvider.clientId
+                toFieldPath: identity.clientId
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: identity.resourceGroupName
+                toFieldPath: spec.forProvider.resourceGroupName
+          - name: identity-membership
+            base:
+              apiVersion: groups.azuread.m.upbound.io/v1beta1
+              kind: Member
+            patches:
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: identity.principalId
+                toFieldPath: spec.forProvider.memberObjectId
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: entraGroups.crossplaneLandingZoneIdentities
+                toFieldPath: spec.forProvider.groupObjectId
+          - name: identity-federation
+            base:
+              apiVersion: managedidentity.azure.m.upbound.io/v1beta1
+              kind: FederatedIdentityCredential
+              spec:
+                forProvider:
+                  parentIdSelector:
+                    matchControllerRef: true
+                  subject: system:serviceaccount:crossplane-system:provider-azure
+            patches:
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: identity.issuer
+                toFieldPath: spec.forProvider.issuer
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: identity.issuer
+                toFieldPath: spec.forProvider.audience[0]
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: identity.resourceGroupName
+                toFieldPath: spec.forProvider.resourceGroupName
+          - name: roleassignment
+            base:
+              apiVersion: authorization.azure.m.upbound.io/v1beta1
+              kind: RoleAssignment
+              metadata:
+                labels:
+                  identity: provider
+              spec:
+                forProvider:
+                  principalType: ServicePrincipal
+                  roleDefinitionName: Owner
+            patches:
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: subscription.subscriptionId
+                toFieldPath: spec.forProvider.scope
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "/subscriptions/%s"
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: identity.principalId
+                toFieldPath: spec.forProvider.principalId
+          - name: provider-config
+            base:
+              apiVersion: azure.m.upbound.io/v1beta1
+              kind: ProviderConfig
+              spec:
+                credentials:
+                  source: OIDCTokenFile
+                oidcTokenFilePath: /var/run/secrets/tokens/sa-token
+            patches:
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: subscription.subscriptionId
+                toFieldPath: spec.subscriptionID
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: identity.clientId
+                toFieldPath: spec.clientID
+              - type: ToEnvironmentFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: providerconfig.azure.name
+              - type: FromEnvironmentFieldPath
+                fromFieldPath: tenantId
+                toFieldPath: spec.tenantID
+            readinessChecks:
+              - type: NonEmpty
+                fieldPath: kind
+          - name: feature-container-service
+            base:
+              apiVersion: azure.m.upbound.io/v1beta1
+              kind: ResourceProviderRegistration
+              spec:
+                forProvider:
+                  name: Microsoft.ContainerService
+                providerConfigRef:
+                  kind: ProviderConfig
+            patches:
+              - type: PatchSet
+                patchSetName: provider-config-name
+          - name: feature-network
+            base:
+              apiVersion: azure.m.upbound.io/v1beta1
+              kind: ResourceProviderRegistration
+              spec:
+                forProvider:
+                  name: Microsoft.Network
+                  feature:
+                    - name: DisableNetworkWatcherAutocreation
+                      registered: true
+                providerConfigRef:
+                  kind: ProviderConfig
+            patches:
+              - type: PatchSet
+                patchSetName: provider-config-name
+          - name: feature-compute
+            base:
+              apiVersion: azure.m.upbound.io/v1beta1
+              kind: ResourceProviderRegistration
+              spec:
+                forProvider:
+                  name: Microsoft.Compute
+                providerConfigRef:
+                  kind: ProviderConfig
+            patches:
+              - type: PatchSet
+                patchSetName: provider-config-name
+          - name: resource-group
+            base:
+              apiVersion: azure.m.upbound.io/v1beta1
+              kind: ResourceGroup
+              spec:
+                forProvider:
+                  location: norwayeast
+                providerConfigRef:
+                  kind: ProviderConfig
+            patches:
+              - type: PatchSet
+                patchSetName: provider-config-name
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.annotations[crossplane.io/external-name]
+                transforms:
+                  - type: string
+                    string:
+                      type: Format
+                      fmt: "%s-rg"
+              - type: ToEnvironmentFieldPath
+                fromFieldPath: metadata.annotations[crossplane.io/external-name]
+                toFieldPath: resourceGroup.resourceGroupName
+          - name: provider-config-uses-subscription
+            base:
+              apiVersion: protection.crossplane.io/v1beta1
+              kind: Usage
+              spec:
+                replayDeletion: true
+                of:
+                  apiVersion: azure.m.upbound.io/v1beta1
+                  kind: Subscription
+                  resourceSelector:
+                    matchControllerRef: true
+                by:
+                  apiVersion: azure.m.upbound.io/v1beta1
+                  kind: ProviderConfig
+                  resourceSelector:
+                    matchControllerRef: true
+          - name: provider-config-uses-identity-federation
+            base:
+              apiVersion: protection.crossplane.io/v1beta1
+              kind: Usage
+              spec:
+                replayDeletion: true
+                of:
+                  apiVersion: managedidentity.azure.m.upbound.io/v1beta1
+                  kind: FederatedIdentityCredential
+                  resourceSelector:
+                    matchControllerRef: true
+                by:
+                  apiVersion: azure.m.upbound.io/v1beta1
+                  kind: ProviderConfig
+                  resourceSelector:
+                    matchControllerRef: true
+          - name: provider-config-uses-roleassignment
+            base:
+              apiVersion: protection.crossplane.io/v1beta1
+              kind: Usage
+              spec:
+                replayDeletion: true
+                of:
+                  apiVersion: authorization.azure.m.upbound.io/v1beta1
+                  kind: RoleAssignment
+                  resourceSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      identity: provider
+                by:
+                  apiVersion: azure.m.upbound.io/v1beta1
+                  kind: ProviderConfig
+                  resourceSelector:
+                    matchControllerRef: true
+          - name: identity-federation-uses-identity
+            base:
+              apiVersion: protection.crossplane.io/v1beta1
+              kind: Usage
+              spec:
+                replayDeletion: true
+                of:
+                  apiVersion: managedidentity.azure.m.upbound.io/v1beta1
+                  kind: UserAssignedIdentity
+                  resourceSelector:
+                    matchControllerRef: true
+                by:
+                  apiVersion: managedidentity.azure.m.upbound.io/v1beta1
+                  kind: FederatedIdentityCredential
+                  resourceSelector:
+                    matchControllerRef: true
+          - name: roleassignment-uses-identity
+            base:
+              apiVersion: protection.crossplane.io/v1beta1
+              kind: Usage
+              spec:
+                replayDeletion: true
+                of:
+                  apiVersion: managedidentity.azure.m.upbound.io/v1beta1
+                  kind: UserAssignedIdentity
+                  resourceSelector:
+                    matchControllerRef: true
+                by:
+                  apiVersion: authorization.azure.m.upbound.io/v1beta1
+                  kind: RoleAssignment
+                  resourceSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      identity: provider
+          - name: identity-membership-uses-identity
+            base:
+              apiVersion: protection.crossplane.io/v1beta1
+              kind: Usage
+              spec:
+                replayDeletion: true
+                of:
+                  apiVersion: managedidentity.azure.m.upbound.io/v1beta1
+                  kind: UserAssignedIdentity
+                  resourceSelector:
+                    matchControllerRef: true
+                by:
+                  apiVersion: groups.azuread.m.upbound.io/v1beta1
+                  kind: Member
+                  resourceSelector:
+                    matchControllerRef: true
+    - step: template-resources
+      functionRef:
+        name: crossplane-contrib-function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- $xr := getCompositeResource . }}
+            {{- $env := .context | dig "apiextensions.crossplane.io/environment" dict }}
+
+            {{- $members := list }}
+
+            {{- range $xr.spec.members }}
+              {{- $currentMember := . }}
+            ---
+            apiVersion: users.azuread.m.upbound.io/v1beta1
+            kind: User
+            metadata:
+              annotations:
+                {{ setResourceNameAnnotation (print "user-" .email) }}
+                crossplane.io/external-name: /users/{{ .email }}
+            spec:
+              forProvider: {}
+              managementPolicies:
+                - Observe
+
+              {{- $u := getComposedResource $ (print "user-" .email) }}
+              {{- with $u.status.atProvider }}
+                {{- $members = append $members (dict "objectId" .objectId "upn" .userPrincipalName "role" $currentMember.role) }}
+              {{- end }}
+            {{- end }}
+
+            {{- range $members }}
+            ---
+            apiVersion: authorization.azure.m.upbound.io/v1beta1
+            kind: RoleAssignment
+            metadata:
+              annotations:
+                {{ setResourceNameAnnotation (print "user-role-" .upn) }}
+            spec:
+              forProvider:
+                principalType: User
+                roleDefinitionName: {{ .role }}
+                principalId: {{ .objectId }}
+                scope: /subscriptions/{{ $env.subscription.subscriptionId }}
+            {{- end }}
+    - step: automatically-detect-ready-composed-resources
+      functionRef:
+        name: crossplane-contrib-function-auto-ready

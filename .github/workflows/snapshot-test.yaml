@@ -1,0 +1,34 @@
+---
+name: Snapshot Test
+on:
+  workflow_dispatch: {}
+  push: {}
+
+jobs:
+  snapshot-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install deps
+        run: >
+          sudo apt-get update
+          && sudo apt-get install -y --no-install-recommends
+          ca-certificates
+          curl
+          make
+          && sudo rm -rf /var/lib/apt/lists/*
+
+      - name: Install atmos-crossplane cli
+        run: >
+          curl -sSfL
+          https://github.com/sn-atmos/crossplane/releases/download/v0.3.0/crossplane_0.3.0_linux_amd64.tar.gz
+          | tar -xzC /usr/local/bin --transform 's|crossplane|atmos-crossplane|' crossplane
+
+      - name: Test
+        run: |
+          make test

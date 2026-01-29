@@ -1,0 +1,45 @@
+---
+apiVersion: meta.pkg.crossplane.io/v1
+kind: Configuration
+metadata:
+  name: environment
+spec:
+  dependsOn:
+    - apiVersion: pkg.crossplane.io/v1
+      kind: Function
+      package: xpkg.crossplane.io/crossplane-contrib/function-auto-ready
+      version: ">=v0.3.0, <v1.0.0"
+    - apiVersion: pkg.crossplane.io/v1
+      kind: Function
+      package: xpkg.crossplane.io/crossplane-contrib/function-patch-and-transform
+      version: ">=v0.9.0, <v1.0.0"
+    - apiVersion: pkg.crossplane.io/v1
+      kind: Function
+      package: xpkg.crossplane.io/crossplane-contrib/function-environment-configs
+      version: ">=v0.4.0, <v1.0.0"
+    - apiVersion: pkg.crossplane.io/v1
+      kind: Function
+      package: xpkg.crossplane.io/crossplane-contrib/function-go-templating
+      version: ">=v0.11.0, <v1.0.0"
+    - apiVersion: pkg.crossplane.io/v1
+      kind: Provider
+      package: xpkg.crossplane.io/crossplane-contrib/provider-family-azure
+      version: ">=v2.0.0, <v3.0.0"
+    - apiVersion: pkg.crossplane.io/v1
+      kind: Provider
+      package: xpkg.crossplane.io/crossplane-contrib/provider-azuread
+      version: ">=v2.0.0, <v3.0.0"
+    - apiVersion: pkg.crossplane.io/v1
+      kind: Provider
+      package: xpkg.crossplane.io/crossplane-contrib/provider-azure-managedidentity
+      version: ">=v2.0.0, <v3.0.0"
+    - apiVersion: pkg.crossplane.io/v1
+      kind: Provider
+      package: xpkg.crossplane.io/crossplane-contrib/provider-azure-authorization
+      version: ">=v2.0.0, <v3.0.0"
+    - apiVersion: pkg.crossplane.io/v1
+      kind: Provider
+      package: xpkg.crossplane.io/crossplane-contrib/provider-azure-management
+      version: ">=v2.0.0, <v3.0.0"
+  crossplane:
+    version: ">=v2.0.2, <v3.0.0"

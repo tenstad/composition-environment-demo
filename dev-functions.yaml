@@ -1,0 +1,9 @@
+---
+apiVersion: pkg.crossplane.io/v1beta1
+kind: Function
+metadata:
+  name: crossplane-contrib-function-environment-configs
+  annotations:
+    render.crossplane.io/runtime-docker-name: crossplane-contrib-function-environment-configs
+spec:
+  package: ghcr.io/sn-atmos/function-environment-configs:v0.0.9

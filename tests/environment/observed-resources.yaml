@@ -1,0 +1,36 @@
+---
+apiVersion: azure.m.upbound.io/v1beta1
+kind: Subscription
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: subscription
+status:
+  atProvider:
+    subscriptionId: 0000-00-00-0000
+---
+apiVersion: azure.m.upbound.io/v1beta1
+kind: ProviderConfig
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: provider-config
+  name: dev-0123abcd
+---
+apiVersion: users.azuread.m.upbound.io/v1beta1
+kind: User
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: user-foo.bar@example.io
+status:
+  atProvider:
+    objectId: 12341234-1234-1234-1234-00005313263d
+    userPrincipalName: foo.bar@example.io
+---
+apiVersion: users.azuread.m.upbound.io/v1beta1
+kind: User
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: user-baz.qux@example.io
+status:
+  atProvider:
+    objectId: 12341234-1234-1234-1234-48d15313263d
+    userPrincipalName: baz.qux@example.io

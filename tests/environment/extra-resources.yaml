@@ -1,0 +1,23 @@
+---
+apiVersion: apiextensions.crossplane.io/v1beta1
+kind: EnvironmentConfig
+metadata:
+  name: azure
+data:
+  tenantId: 000-01-123
+  tenantShortName: foo
+  billing:
+    billingScopeId: /providers/Microsoft.Billing/billingAccounts/00001111/enrollmentAccounts/123456
+  identity:
+    issuer: https://swedencentral.oic.prod-aks.azure.com/1234/5678/
+    resourceGroupName: control-plane-rg
+  archetypes:
+    Standard:
+      managementGroupId: management-group-id-123
+    SharedServices:
+      managementGroupIdSelector:
+        matchLabels:
+          crossplane.io/composite: shared-services
+        namespace: management
+  entraGroups:
+    crossplaneLandingZoneIdentities: crossplaneLandingZoneIdentities-group-id
